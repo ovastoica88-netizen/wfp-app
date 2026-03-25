@@ -646,9 +646,17 @@ tbody td { padding: 9px 12px; font-size: 13px; }
 
   auth.onAuthStateChanged(function(user) {
     window._authUser = user;
+    // If page already ready, handle immediately. Otherwise wait for load event.
     if (window._pageReady) {
       window._handleAuth(user);
     }
+    // Also trigger after a short delay in case load event already fired
+    setTimeout(function() {
+      if (!window._authHandled && window._handleAuth) {
+        window._authHandled = true;
+        window._handleAuth(user);
+      }
+    }, 1000);
   });
 
   window._handleAuth = function(user) {
@@ -6631,7 +6639,8 @@ if (isIOS && !window.navigator.standalone) {
 // Seite ist komplett geladen - jetzt Auth auslösen
 window.addEventListener('load', function() {
   window._pageReady = true;
-  if (window._authUser !== undefined && window._handleAuth) {
+  if (!window._authHandled && window._authUser !== undefined && window._handleAuth) {
+    window._authHandled = true;
     window._handleAuth(window._authUser);
   }
 });
