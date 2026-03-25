@@ -640,7 +640,18 @@ tbody td { padding: 9px 12px; font-size: 13px; }
   };
 
   // ── Auth Status überwachen ─────────────────────────────────────────────
+  // Warten bis die ganze Seite geladen ist bevor Auth geprüft wird
+  window._authUser = null;
+  window._pageReady = false;
+
   auth.onAuthStateChanged(function(user) {
+    window._authUser = user;
+    if (window._pageReady) {
+      window._handleAuth(user);
+    }
+  });
+
+  window._handleAuth = function(user) {
     window._fbUser = user;
     var ls = document.getElementById('loginScreen');
     var ma = document.getElementById('mainApp');
@@ -747,7 +758,7 @@ tbody td { padding: 9px 12px; font-size: 13px; }
       if (ls) ls.style.display = 'flex';
       if (ma) ma.style.display = 'none';
     }
-  });
+  }; // end _handleAuth
 </script>
 </head>
 <body>
@@ -6615,6 +6626,15 @@ if (isIOS && !window.navigator.standalone) {
     b.style.display='flex'; }
   }, 3000);
 }
+</script>
+<script>
+// Seite ist komplett geladen - jetzt Auth auslösen
+window.addEventListener('load', function() {
+  window._pageReady = true;
+  if (window._authUser !== undefined && window._handleAuth) {
+    window._handleAuth(window._authUser);
+  }
+});
 </script>
 </body>
 </html>
