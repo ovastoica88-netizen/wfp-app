@@ -661,15 +661,23 @@ tbody td { padding: 9px 12px; font-size: 13px; }
         window.PHKP = phkp;
         window.ERST = erst;
         window.KOOP = koop;
-        if (typeof renderPhkp === 'function') renderPhkp();
-        if (typeof renderErst === 'function') renderErst();
-        if (typeof renderGenehmigung === 'function') renderGenehmigung();
-        if (typeof renderKoop === 'function') renderKoop();
-        if (typeof updateTabBadges === 'function') updateTabBadges();
-        if (overlay) overlay.style.display = 'none';
-        fbSetSyncStatus('🟢 Verbunden', '#22c55e');
-        setTimeout(function(){ fbSetSyncStatus('', ''); }, 2000);
-        window._fbStartSync();
+        // Retry until render functions are available
+        function tryRender(n) {
+          if (typeof renderPhkp === 'function' && typeof renderErst === 'function' && typeof renderKoop === 'function') {
+            renderPhkp();
+            renderErst();
+            if (typeof renderGenehmigung === 'function') renderGenehmigung();
+            renderKoop();
+            if (typeof updateTabBadges === 'function') updateTabBadges();
+            if (overlay) overlay.style.display = 'none';
+            fbSetSyncStatus('🟢 Verbunden', '#22c55e');
+            setTimeout(function(){ fbSetSyncStatus('', ''); }, 2000);
+            window._fbStartSync();
+          } else if (n > 0) {
+            setTimeout(function(){ tryRender(n - 1); }, 200);
+          }
+        }
+        tryRender(30);
       }
 
       function migriereDateien(phkp, erst, koop) {
