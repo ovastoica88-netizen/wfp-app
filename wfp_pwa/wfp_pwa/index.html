@@ -752,7 +752,7 @@ tbody td { padding: 9px 12px; font-size: 13px; }
 <body>
 
 <!-- Login Screen -->
-<div id="loginScreen" style="display:flex;position:fixed;inset:0;z-index:99999;background:linear-gradient(135deg,#0d3550,#1B557A);align-items:center;justify-content:center;">
+<div id="loginScreen" style="display:none;position:fixed;inset:0;z-index:99999;background:linear-gradient(135deg,#0d3550,#1B557A);align-items:center;justify-content:center;">
   <div style="background:#fff;border-radius:20px;padding:36px 40px;width:340px;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
     <div style="text-align:center;margin-bottom:28px;">
       <div style="font-size:40px;margin-bottom:10px;">🏥</div>
@@ -798,7 +798,7 @@ tbody td { padding: 9px 12px; font-size: 13px; }
 <style>@keyframes spin{to{transform:rotate(360deg)}}</style>
 
 <!-- Hauptapp (wird nach Login sichtbar) -->
-<div id="mainApp" style="display:none;">
+<div id="mainApp" style="display:block;">
 <!-- Admin Panel Modal -->
 <div class="modal-bg" id="modalAdmin" style="display:none;" onclick="if(event.target===this)this.style.display='none';">
 <style>
