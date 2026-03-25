@@ -661,22 +661,23 @@ tbody td { padding: 9px 12px; font-size: 13px; }
         window.PHKP = phkp;
         window.ERST = erst;
         window.KOOP = koop;
-        // Store data globally and render when ready
-        window._pendingRender = true;
-        if (typeof renderPhkp === 'function') {
-          // Functions already available - render now
+        // Warte 2 Sekunden bis alle Scripts geladen sind, dann rendern
+        window._pendingPhkp = phkp;
+        window._pendingErst = erst;
+        window._pendingKoop = koop;
+        setTimeout(function() {
+          window.PHKP = window._pendingPhkp;
+          window.ERST = window._pendingErst;
+          window.KOOP = window._pendingKoop;
           renderPhkp();
           renderErst();
-          if (typeof renderGenehmigung === 'function') renderGenehmigung();
+          renderGenehmigung();
           renderKoop();
-          if (typeof updateTabBadges === 'function') updateTabBadges();
-          if (overlay) overlay.style.display = 'none';
-          fbSetSyncStatus('🟢 Verbunden', '#22c55e');
-          setTimeout(function(){ fbSetSyncStatus('', ''); }, 2000);
+          updateTabBadges();
+          var ov = document.getElementById('fbLoadingOverlay');
+          if (ov) ov.style.display = 'none';
           window._fbStartSync();
-          window._pendingRender = false;
-        }
-        // If not ready yet, the DOMContentLoaded handler below will render
+        }, 2000);
       }
 
       function migriereDateien(phkp, erst, koop) {
