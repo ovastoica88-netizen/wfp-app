@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><title>DB Test</title></head>
+<body style="font-family:Arial;padding:20px;background:#1B557A;color:#fff;">
+<h2>🔍 Firestore Test</h2>
+<div id="out" style="background:#fff;color:#333;padding:16px;border-radius:8px;font-size:14px;"></div>
+
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+<script>
+function log(msg) {
+  document.getElementById('out').innerHTML += msg + '<br>';
+}
+
+firebase.initializeApp({
+  apiKey: "AIzaSyAxQqdzNFOgYpbXliONDHa14cZfukN-uU8",
+  authDomain: "wfp-warteliste.firebaseapp.com",
+  projectId: "wfp-warteliste",
+  storageBucket: "wfp-warteliste.firebasestorage.app",
+  messagingSenderId: "286237800266",
+  appId: "1:286237800266:web:14089137c5c1c6731073b3"
+});
+
+var db = firebase.firestore();
+
+firebase.auth().onAuthStateChanged(function(user) {
+  if (!user) {
+    log('❌ Nicht eingeloggt!');
+    return;
+  }
+  log('✅ Eingeloggt: ' + user.email);
+  log('Lade Daten...');
+  
+  Promise.all([
+    db.collection('wfp_phkp').get(),
+    db.collection('wfp_erst').get(),
+    db.collection('wfp_koop').get()
+  ]).then(function(r) {
+    log('✅ wfp_phkp: ' + r[0].size + ' Dokumente');
+    log('✅ wfp_erst: ' + r[1].size + ' Dokumente');
+    log('✅ wfp_koop: ' + r[2].size + ' Dokumente');
+    if (r[0].size > 0) {
+      log('<br>✅ DATEN VORHANDEN - App sollte funktionieren!');
+      log('<br><a href="index.html" style="color:#1B557A;font-weight:bold;">→ Zur App</a>');
+    } else {
+      log('<br>❌ Keine Daten - Migration nötig!');
+      log('<a href="migration.html" style="color:#1B557A;font-weight:bold;">→ Migration starten</a>');
+    }
+  }).catch(function(e) {
+    log('❌ Fehler: ' + e.message);
+  });
+});
+</script>
+</body>
+</html>

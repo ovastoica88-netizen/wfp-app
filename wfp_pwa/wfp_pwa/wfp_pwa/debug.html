@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Debug</title>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+<script>
+firebase.initializeApp({
+  apiKey: "AIzaSyAxQqdzNFOgYpbXliONDHa14cZfukN-uU8",
+  authDomain: "wfp-warteliste.firebaseapp.com",
+  projectId: "wfp-warteliste",
+  storageBucket: "wfp-warteliste.firebasestorage.app",
+  messagingSenderId: "286237800266",
+  appId: "1:286237800266:web:14089137c5c1c6731073b3"
+});
+var db = firebase.firestore();
+var auth = firebase.auth();
+</script>
+</head>
+<body style="font-family:Arial;padding:20px;">
+<h2>Debug</h2>
+<div id="log" style="background:#f0f0f0;padding:12px;border-radius:8px;font-size:13px;"></div>
+
+<div id="loginDiv" style="margin-top:20px;display:none;">
+  <input id="em" type="email" placeholder="Email" style="padding:8px;width:250px;"><br><br>
+  <input id="pw" type="password" placeholder="Passwort" style="padding:8px;width:250px;"><br><br>
+  <button onclick="doLogin()" style="padding:10px 20px;background:#1B557A;color:#fff;border:none;border-radius:6px;cursor:pointer;">Einloggen</button>
+</div>
+
+<div id="dataDiv" style="margin-top:20px;display:none;">
+  <div id="phkpList"></div>
+</div>
+
+<script>
+function log(msg, color) {
+  var d = document.getElementById('log');
+  d.innerHTML += '<div style="color:'+(color||'#333')+';margin:2px 0;">' + msg + '</div>';
+}
+
+log('Seite geladen ✅');
+log('Firebase initialisiert ✅');
+
+auth.onAuthStateChanged(function(user) {
+  if (user) {
+    log('Eingeloggt: ' + user.email, 'green');
+    ladeUndZeige();
+  } else {
+    log('Nicht eingeloggt - Login-Formular wird angezeigt');
+    document.getElementById('loginDiv').style.display = 'block';
+  }
+});
+
+function doLogin() {
+  var email = document.getElementById('em').value.trim();
+  var pass = document.getElementById('pw').value.trim();
+  log('Versuche Login...');
+  auth.signInWithEmailAndPassword(email, pass)
+    .catch(function(e) { log('❌ ' + e.message, 'red'); });
+}
+
+function ladeUndZeige() {
+  log('Lade Daten aus Firestore...');
+  db.collection('wfp_phkp').get().then(function(snap) {
+    log('✅ ' + snap.size + ' Patienten gefunden', 'green');
+    var html = '<h3>Patienten:</h3>';
+    snap.forEach(function(d) {
+      var p = d.data();
+      html += '<div style="padding:6px;border-bottom:1px solid #ddd;">' + (p.name||'?') + ' · ' + (p.kasse||'') + '</div>';
+    });
+    document.getElementById('phkpList').innerHTML = html;
+    document.getElementById('dataDiv').style.display = 'block';
+    log('✅ Anzeige erfolgreich!', 'green');
+  }).catch(function(e) {
+    log('❌ Fehler: ' + e.message, 'red');
+  });
+}
+</script>
+</body>
+</html>

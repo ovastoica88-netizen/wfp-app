@@ -1,0 +1,25 @@
+{
+  "name": "WFP Warteliste",
+  "short_name": "WFP",
+  "description": "WOHLFÜHLPFLEGE GmbH – PHKP Verordnungs- & Erstkontakt-Warteliste",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#1B557A",
+  "theme_color": "#1B557A",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["medical", "productivity", "business"]
+}
