@@ -220,535 +220,7 @@ tbody td { padding: 9px 12px; font-size: 13px; }
 </style>
 <!-- Firebase SDK -->
 <!-- Firebase Compat SDK (funktioniert ohne module/import) -->
-<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
-<script>
-  var firebaseConfig = {
-    apiKey: "AIzaSyAxQqdzNFOgYpbXliONDHa14cZfukN-uU8",
-    authDomain: "wfp-warteliste.firebaseapp.com",
-    projectId: "wfp-warteliste",
-    storageBucket: "wfp-warteliste.firebasestorage.app",
-    messagingSenderId: "286237800266",
-    appId: "1:286237800266:web:14089137c5c1c6731073b3"
-  };
 
-  firebase.initializeApp(firebaseConfig);
-  var db   = firebase.firestore();
-  var auth = firebase.auth();
-
-  window._fbDb   = db;
-  window._fbAuth = auth;
-  window._fbUser = null;
-
-  // ── Login ──────────────────────────────────────────────────────────────
-  // ── Login ─────────────────────────────────────────────────────────────
-  function doLogin() {
-    var email = (document.getElementById('loginEmail').value||'').trim();
-    var pass  = (document.getElementById('loginPass').value||'').trim();
-    var err   = document.getElementById('loginError');
-    var btn   = document.getElementById('loginBtn');
-    if (!email || !pass) { err.textContent = 'Bitte Email und Passwort eingeben.'; return; }
-    err.textContent = '⏳ Anmelden...';
-    if (btn) btn.disabled = true;
-    firebase.auth().signInWithEmailAndPassword(email, pass)
-      .catch(function(e) {
-        if (btn) btn.disabled = false;
-        err.textContent = (e.code === 'auth/invalid-credential' || e.code === 'auth/wrong-password' || e.code === 'auth/user-not-found')
-          ? '❌ Email oder Passwort falsch.'
-          : '❌ ' + e.message;
-      });
-  }
-  window.doLogin = doLogin;
-
-  // ── Logout ─────────────────────────────────────────────────────────────
-  window.fbLogout = function() {
-    auth.signOut();
-  };
-
-  // ════════════════════════════════════════════════════════════════════════
-  // ECHTZEIT-SYNC — Jeder Eintrag = eigenes Firestore-Dokument
-  // Kein "Last Write Wins" mehr. Mehrere Nutzer können gleichzeitig arbeiten.
-  // ════════════════════════════════════════════════════════════════════════
-
-  // Sync-Status anzeigen
-  function fbSetSyncStatus(text, color) {
-    var s = document.getElementById('fbSyncStatus');
-    if (s) { s.textContent = text; s.style.color = color || 'rgba(255,255,255,0.45)'; }
-  }
-
-  // Eindeutige ID für jeden neuen Eintrag generieren
-  function fbNewId() {
-    return db.collection('_').doc().id; // Firestore-ID ohne zu schreiben
-  }
-
-  // Sicherstellen dass alle Einträge eine _id haben (Migration)
-  function ensureIds(arr, prefix) {
-    arr.forEach(function(item) {
-      if (!item._id) item._id = prefix + '_' + Date.now() + '_' + Math.random().toString(36).slice(2,8);
-    });
-  }
-
-  // ── Einzelnen Eintrag speichern (atomar — berührt keine anderen Einträge) ──
-  window.fbSaveItem = function(collection, item) {
-    if (!window._fbUser) return Promise.resolve();
-    if (!item._id) item._id = fbNewId();
-    item._updatedAt = new Date().toISOString();
-    item._updatedBy = window._fbUser.email;
-    return db.collection(collection).doc(item._id).set(item)
-      .then(function() {
-        fbSetSyncStatus('✅ ' + new Date().toLocaleTimeString('de-DE') + ' · ' + (window._fbUser.email.split('@')[0]), '#22c55e');
-      })
-      .catch(function(e) {
-        fbSetSyncStatus('❌ Fehler beim Speichern', '#ef4444');
-        console.error('fbSaveItem Fehler:', e);
-      });
-  };
-
-  // ── Eintrag löschen (Soft-Delete: nur geloescht-Flag setzen) ─────────
-  window.fbDeleteItem = function(collection, id) {
-    if (!window._fbUser || !id) return Promise.resolve();
-    return db.collection(collection).doc(id).update({
-      geloescht: true,
-      _updatedAt: new Date().toISOString(),
-      _updatedBy: window._fbUser.email
-    }).catch(function(e) { console.error('fbDeleteItem Fehler:', e); });
-  };
-
-  // ── Komplette Collection schreiben (für Batch-Import) ────────────────
-  window.fbSaveAll = function() {
-    if (!window._fbUser) return Promise.resolve();
-    fbSetSyncStatus('💾 Synchronisiere…', '#f97316');
-    ensureIds(window.PHKP||[], 'p');
-    ensureIds(window.ERST||[], 'e');
-    ensureIds(window.KOOP||[], 'k');
-
-    // Batch-Writes (max 500 pro Batch — reicht hier locker)
-    var batch = db.batch();
-    var who = window._fbUser.email;
-    var now = new Date().toISOString();
-
-    (window.PHKP||[]).forEach(function(item) {
-      item._updatedAt = now; item._updatedBy = who;
-      batch.set(db.collection('wfp_phkp').doc(item._id), item);
-    });
-    (window.ERST||[]).forEach(function(item) {
-      item._updatedAt = now; item._updatedBy = who;
-      batch.set(db.collection('wfp_erst').doc(item._id), item);
-    });
-    (window.KOOP||[]).forEach(function(item) {
-      item._updatedAt = now; item._updatedBy = who;
-      batch.set(db.collection('wfp_koop').doc(item._id), item);
-    });
-
-    return batch.commit()
-      .then(function() {
-        fbSetSyncStatus('✅ ' + new Date().toLocaleTimeString('de-DE'), '#22c55e');
-      })
-      .catch(function(e) {
-        fbSetSyncStatus('❌ Sync fehlgeschlagen', '#ef4444');
-        console.error('fbSaveAll Fehler:', e);
-      });
-  };
-
-  // Kompatibilität: saveToLocal ruft jetzt fbSaveAll auf
-  window.fbSave = window.fbSaveAll;
-  window.fbSaveDebounced = window.fbSaveAll; // Kein Debounce nötig bei Einzel-Writes
-  window.fbMarkEditing = function() {}; // Nicht mehr nötig
-
-  // ── Realtime Listener für alle 3 Collections ─────────────────────────
-  window._fbStartSync = function() {
-    function rerender() {
-      if (typeof renderPhkp === 'function') renderPhkp();
-      if (typeof renderErst === 'function') renderErst();
-      if (typeof renderGenehmigung === 'function') renderGenehmigung();
-      if (typeof renderKoop === 'function') renderKoop();
-      if (typeof updateTabBadges === 'function') updateTabBadges();
-    }
-
-    function showUpdateBanner(who) {
-      var banner = document.getElementById('fbSyncBanner');
-      if (banner && who && who !== (window._fbUser ? window._fbUser.email : '')) {
-        banner.textContent = '🔄 ' + who.split('@')[0] + ' hat gerade Daten aktualisiert';
-        banner.style.display = 'block';
-        clearTimeout(banner._hideTimer);
-        banner._hideTimer = setTimeout(function(){ banner.style.display = 'none'; }, 4000);
-      }
-    }
-
-    // PHKP Collection Listener
-    db.collection('wfp_phkp').onSnapshot(function(snap) {
-      if (snap.empty && (window.PHKP||[]).length === 0) return;
-      var changed = false;
-      snap.docChanges().forEach(function(change) {
-        var data = change.doc.data();
-        var idx = (window.PHKP||[]).findIndex(function(p){ return p._id === data._id; });
-        if (change.type === 'removed') {
-          if (idx >= 0) { window.PHKP.splice(idx, 1); changed = true; }
-        } else {
-          // added oder modified
-          if (idx >= 0) { window.PHKP[idx] = data; }
-          else { window.PHKP.push(data); }
-          changed = true;
-          if (change.type === 'modified') showUpdateBanner(data._updatedBy);
-        }
-      });
-      if (changed) {
-        rerender();
-        fbSetSyncStatus('🔄 ' + new Date().toLocaleTimeString('de-DE'), '');
-      }
-    }, function(e) { console.error('PHKP Listener Fehler:', e); });
-
-    // ERST Collection Listener
-    db.collection('wfp_erst').onSnapshot(function(snap) {
-      if (snap.empty && (window.ERST||[]).length === 0) return;
-      snap.docChanges().forEach(function(change) {
-        var data = change.doc.data();
-        var idx = (window.ERST||[]).findIndex(function(e){ return e._id === data._id; });
-        if (change.type === 'removed') {
-          if (idx >= 0) { window.ERST.splice(idx, 1); }
-        } else {
-          if (idx >= 0) { window.ERST[idx] = data; }
-          else { window.ERST.push(data); }
-          if (change.type === 'modified') showUpdateBanner(data._updatedBy);
-        }
-      });
-      rerender();
-    }, function(e) { console.error('ERST Listener Fehler:', e); });
-
-    // KOOP Collection Listener
-    db.collection('wfp_koop').onSnapshot(function(snap) {
-      if (snap.empty && (window.KOOP||[]).length === 0) return;
-      snap.docChanges().forEach(function(change) {
-        var data = change.doc.data();
-        var idx = (window.KOOP||[]).findIndex(function(k){ return k._id === data._id; });
-        if (change.type === 'removed') {
-          if (idx >= 0) { window.KOOP.splice(idx, 1); }
-        } else {
-          if (idx >= 0) { window.KOOP[idx] = data; }
-          else { window.KOOP.push(data); }
-          if (change.type === 'modified') showUpdateBanner(data._updatedBy);
-        }
-      });
-      rerender();
-    }, function(e) { console.error('KOOP Listener Fehler:', e); });
-
-    fbSetSyncStatus('🟢 Verbunden', '#22c55e');
-    setTimeout(function(){ fbSetSyncStatus('', ''); }, 3000);
-  };
-
-  // ── Admin: Passwort-Stärke prüfen ─────────────────────────────────────
-  window.adminCheckPassStrength = function(v) {
-    var b1=document.getElementById('adminPassBar1'),b2=document.getElementById('adminPassBar2');
-    var b3=document.getElementById('adminPassBar3'),b4=document.getElementById('adminPassBar4');
-    var lb=document.getElementById('adminPassLabel');
-    if(!b1)return;
-    var s=0;
-    if(v.length>=4)s++;
-    if(v.length>=8)s++;
-    if(/[A-Z]/.test(v)&&/[a-z]/.test(v))s++;
-    if(/\d/.test(v)||/[^A-Za-z0-9]/.test(v))s++;
-    var colors=['#e2e8f0','#e2e8f0','#e2e8f0','#e2e8f0'];
-    var label='',lc='#94a3b8';
-    if(v.length===0){label='';}
-    else if(s<=1){colors[0]='#ef4444';label='Schwach';lc='#ef4444';}
-    else if(s===2){colors[0]='#f97316';colors[1]='#f97316';label='Mittel';lc='#f97316';}
-    else if(s===3){colors[0]='#eab308';colors[1]='#eab308';colors[2]='#eab308';label='Gut';lc='#eab308';}
-    else{colors[0]='#22c55e';colors[1]='#22c55e';colors[2]='#22c55e';colors[3]='#22c55e';label='Stark';lc='#22c55e';}
-    [b1,b2,b3,b4].forEach(function(b,i){b.style.background=colors[i];});
-    if(lb){lb.textContent=label;lb.style.color=lc;}
-  };
-
-  // ── Admin: Passwort anzeigen/verbergen ────────────────────────────────
-  window.adminTogglePassVis = function(inputId, btn) {
-    var inp = document.getElementById(inputId);
-    if (!inp) return;
-    if (inp.type === 'password') { inp.type = 'text'; btn.textContent = '🙈'; }
-    else { inp.type = 'password'; btn.textContent = '👁'; }
-  };
-
-  // ── Admin: Tab wechseln ───────────────────────────────────────────────
-  window.adminSwitchTab = function(tab) {
-    ['create','list','pw'].forEach(function(t) {
-      var btn = document.getElementById('adminTab_'+t);
-      var panel = document.getElementById('adminPanel_'+t);
-      if (btn) { btn.classList.toggle('active', t===tab); }
-      if (panel) panel.style.display = t===tab ? 'block' : 'none';
-    });
-    if (tab === 'list') window.adminLoadUsers();
-  };
-
-  // ── Admin: Feedback-Nachricht helper ─────────────────────────────────
-  function adminSetMsg(id, msg, type) {
-    var el = document.getElementById(id);
-    if (!el) return;
-    el.textContent = msg;
-    el.className = 'adm-msg show ' + (type||'info');
-    if (!msg) { el.className = 'adm-msg'; }
-  }
-
-  // ── Admin: Nutzer anlegen ─────────────────────────────────────────────
-  window.adminCreateUser = function() {
-    var name  = (document.getElementById('adminNewName').value||'').trim();
-    var email = (document.getElementById('adminNewEmail').value||'').trim();
-    var pass  = (document.getElementById('adminNewPass').value||'').trim();
-    var role  = (document.getElementById('adminNewRole').value||'mitarbeiter');
-    if (!name)  { adminSetMsg('adminCreateError','❌ Bitte den vollständigen Namen eingeben.','err'); return; }
-    if (!email) { adminSetMsg('adminCreateError','❌ Bitte eine E-Mail-Adresse eingeben.','err'); return; }
-    if (!pass || pass.length < 6) { adminSetMsg('adminCreateError','❌ Passwort muss mindestens 6 Zeichen haben.','err'); return; }
-
-    var adminUser  = auth.currentUser;
-    var adminEmail = adminUser ? adminUser.email : null;
-    adminSetMsg('adminCreateError','⏳ Account wird angelegt…','info');
-
-    // Unique name to avoid conflicts between multiple user creations
-    var secAppName = 'secondary_' + Date.now();
-    var secondaryApp = firebase.initializeApp(firebase.app().options, secAppName);
-    var secondaryAuth = secondaryApp.auth();
-
-    secondaryAuth.createUserWithEmailAndPassword(email, pass)
-      .then(function(cred) {
-        return cred.user.updateProfile({ displayName: name })
-          .then(function() {
-            return db.collection('users').doc(cred.user.uid).set({
-              name:name, email:email, role:role,
-              createdAt: new Date().toISOString(),
-              createdBy: adminEmail || 'admin'
-            });
-          })
-          .then(function() {
-            // Sign out the new user from secondary app, then delete the app
-            // This prevents the admin from being logged out
-            return secondaryAuth.signOut().then(function() {
-              return secondaryApp.delete();
-            });
-          });
-      })
-      .then(function() {
-        adminSetMsg('adminCreateError','✅ Account für '+name+' wurde erfolgreich angelegt!','ok');
-        document.getElementById('adminNewName').value = '';
-        document.getElementById('adminNewEmail').value = '';
-        document.getElementById('adminNewPass').value = '';
-        document.getElementById('adminNewRole').value = 'mitarbeiter';
-        window.adminCheckPassStrength('');
-        window.adminRefreshStats && window.adminRefreshStats();
-      })
-      .catch(function(e) {
-        if (e.code==='auth/email-already-in-use') adminSetMsg('adminCreateError','❌ Diese E-Mail ist bereits registriert.','err');
-        else if (e.code==='auth/invalid-email')   adminSetMsg('adminCreateError','❌ Ungültige E-Mail-Adresse.','err');
-        else if (e.code==='auth/weak-password')   adminSetMsg('adminCreateError','❌ Passwort zu schwach — mind. 6 Zeichen bei Firebase.','err');
-        else adminSetMsg('adminCreateError','❌ '+( e.message||e.code),'err');
-      });
-  };
-
-  // ── Admin: Passwort ändern ────────────────────────────────────────────
-  window.adminChangePassword = function() {
-    var curr  = (document.getElementById('adminCurrPass').value||'').trim();
-    var next1 = (document.getElementById('adminNewPassPW').value||'').trim();
-    var next2 = (document.getElementById('adminNewPassPW2').value||'').trim();
-    if (!curr)  { adminSetMsg('adminPwChangeError','❌ Bitte das aktuelle Passwort eingeben.','err'); return; }
-    if (!next1 || next1.length < 4) { adminSetMsg('adminPwChangeError','❌ Neues Passwort muss mind. 4 Zeichen haben.','err'); return; }
-    if (next1 !== next2) { adminSetMsg('adminPwChangeError','❌ Neue Passwörter stimmen nicht überein.','err'); return; }
-    var user = auth.currentUser;
-    if (!user) { adminSetMsg('adminPwChangeError','❌ Kein Nutzer angemeldet.','err'); return; }
-    adminSetMsg('adminPwChangeError','⏳ Passwort wird aktualisiert…','info');
-    var credential = firebase.auth.EmailAuthProvider.credential(user.email, curr);
-    user.reauthenticateWithCredential(credential)
-      .then(function() { return user.updatePassword(next1); })
-      .then(function() {
-        adminSetMsg('adminPwChangeError','✅ Passwort erfolgreich geändert!','ok');
-        document.getElementById('adminCurrPass').value = '';
-        document.getElementById('adminNewPassPW').value = '';
-        document.getElementById('adminNewPassPW2').value = '';
-      })
-      .catch(function(e) {
-        if (e.code==='auth/wrong-password'||e.code==='auth/invalid-credential') adminSetMsg('adminPwChangeError','❌ Aktuelles Passwort falsch.','err');
-        else if (e.code==='auth/weak-password') adminSetMsg('adminPwChangeError','❌ Neues Passwort zu schwach.','err');
-        else adminSetMsg('adminPwChangeError','❌ '+(e.message||e.code),'err');
-      });
-  };
-
-  // ── Admin: Nutzer laden ───────────────────────────────────────────────
-  window.adminLoadUsers = function() {
-    var list = document.getElementById('adminUserList');
-    if (!list) return;
-    list.innerHTML = '<div style="text-align:center;padding:24px;color:#94a3b8;font-size:12px;">⏳ Lade Mitarbeiter…</div>';
-    db.collection('users').orderBy('createdAt','asc').get()
-      .then(function(snap) {
-        var statEl = document.getElementById('adminStatUsers');
-        if (statEl) statEl.textContent = snap.size;
-        if (snap.empty) {
-          list.innerHTML = '<div style="text-align:center;padding:28px;color:#94a3b8;font-size:12px;">Noch keine Mitarbeiter angelegt.</div>';
-          return;
-        }
-        var html = '';
-        snap.forEach(function(d) {
-          var u = d.data(), uid = d.id;
-          var isAdmin = u.role === 'admin';
-          var isSelf = auth.currentUser && auth.currentUser.uid === uid;
-          var initials = (u.name||'?').split(' ').map(function(w){return w[0]||'';}).join('').toUpperCase().slice(0,2);
-          var avatarBg = isAdmin ? 'linear-gradient(135deg,#1B557A,#0369a1)' : 'linear-gradient(135deg,#0f766e,#0d9488)';
-          html += '<div class="adm-user-card">'
-            +'<div class="adm-avatar" style="background:'+avatarBg+';">'+initials+'</div>'
-            +'<div style="flex:1;min-width:0;">'
-            +'<div style="font-size:12px;font-weight:700;color:#1e293b;">'+(u.name||'–')+(isSelf?' <span style="font-size:9px;color:#1B557A;background:#e0f2fe;padding:1px 5px;border-radius:5px;">ich</span>':'')+'</div>'
-            +'<div style="font-size:10px;color:#94a3b8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+(u.email||'–')+'</div>'
-            +'</div>'
-            +'<span class="adm-role-badge" style="'+(isAdmin?'background:#dbeafe;color:#1d4ed8;':'background:#dcfce7;color:#15803d;')+'">'+(isAdmin?'🔑 Admin':'👩‍💼 Mitarb.')+'</span>'
-            +(isSelf?'':'<button class="adm-del-btn" onclick="adminDeleteUser(\''+uid+'\',\''+(u.name||'').replace(/'/g,"\\'")+'\')" title="Löschen">🗑</button>')
-            +'</div>';
-        });
-        list.innerHTML = html;
-      })
-      .catch(function(e) {
-        list.innerHTML = '<div style="padding:12px;background:#fef2f2;border-radius:9px;color:#dc2626;font-size:11px;">❌ Fehler: '+(e.message||e.code)+'</div>';
-      });
-  };
-
-  // ── Admin: Stats Header aktualisieren ────────────────────────────────
-  window.adminRefreshStats = function() {
-    var patNames = {};
-    (window.PHKP||[]).filter(function(p){return !p.geloescht&&!p.pause_seit;}).forEach(function(p){patNames[p.name]=true;});
-    var nPat = Object.keys(patNames).length;
-    var nEK  = (window.ERST||[]).filter(function(e){return !e.geloescht&&!e.eingeplant;}).length;
-    var sp = document.getElementById('adminStatPat');
-    var se = document.getElementById('adminStatEK');
-    if (sp) sp.textContent = nPat;
-    if (se) se.textContent = nEK;
-    db.collection('users').get().then(function(snap){
-      var su = document.getElementById('adminStatUsers');
-      if (su) su.textContent = snap.size;
-    }).catch(function(){});
-  };
-
-  // ── Admin: Nutzer löschen ─────────────────────────────────────────────
-  window.adminDeleteUser = function(uid, name) {
-    if (!confirm('Account von "'+name+'" wirklich löschen?\n\nDer Login wird deaktiviert.')) return;
-    db.collection('users').doc(uid).delete()
-      .then(function() { window.adminLoadUsers(); })
-      .catch(function(e) { alert('Fehler: '+(e.message||e.code)); });
-  };
-
-  // ── Admin Panel öffnen ────────────────────────────────────────────────
-  window.openAdminPanel = function() {
-    var modal = document.getElementById('modalAdmin');
-    var emailEl = document.getElementById('adminCurrentEmail');
-    if (emailEl && auth.currentUser) emailEl.textContent = '👤 '+auth.currentUser.email;
-    modal.style.display = 'flex';
-    window.adminSwitchTab('create');
-    window.adminRefreshStats && window.adminRefreshStats();
-  };
-
-  // ── Auth Status überwachen ─────────────────────────────────────────────
-  auth.onAuthStateChanged(function(user) {
-    window._fbUser = user;
-    var ls = document.getElementById('loginScreen');
-    var ma = document.getElementById('mainApp');
-    if (user) {
-      // App anzeigen, aber mit Lade-Overlay bis Daten da sind
-      if (ls) ls.style.display = 'none';
-      if (ma) ma.style.display = 'block';
-      var uel = document.getElementById('topbarUser');
-      if (uel) uel.textContent = '👤 ' + (user.displayName || user.email.split('@')[0]);
-
-      // Lade-Overlay einblenden
-      var overlay = document.getElementById('fbLoadingOverlay');
-      if (overlay) overlay.style.display = 'flex';
-      fbSetSyncStatus('⏳ Wird geladen…', '#f97316');
-
-      // Daten laden: erst neue Collections prüfen, dann alte als Fallback
-      function ladeApp(phkp, erst, koop) {
-        window.PHKP = phkp;
-        window.ERST = erst;
-        window.KOOP = koop;
-        // Warte 2 Sekunden bis alle Scripts geladen sind, dann rendern
-        window._pendingPhkp = phkp;
-        window._pendingErst = erst;
-        window._pendingKoop = koop;
-        setTimeout(function() {
-          window.PHKP = window._pendingPhkp;
-          window.ERST = window._pendingErst;
-          window.KOOP = window._pendingKoop;
-          renderPhkp();
-          renderErst();
-          renderGenehmigung();
-          renderKoop();
-          updateTabBadges();
-          var ov = document.getElementById('fbLoadingOverlay');
-          if (ov) ov.style.display = 'none';
-          window._fbStartSync();
-        }, 2000);
-      }
-
-      function migriereDateien(phkp, erst, koop) {
-        // IDs vergeben
-        function mitId(arr, prefix) {
-          return arr.map(function(item) {
-            if (!item._id) item._id = prefix + '_' + Math.random().toString(36).slice(2,10) + '_' + Date.now();
-            return item;
-          });
-        }
-        phkp = mitId(phkp, 'p');
-        erst = mitId(erst, 'e');
-        koop = mitId(koop, 'k');
-
-        fbSetSyncStatus('🔄 Einmalige Migration läuft…', '#f97316');
-        var batch = db.batch();
-        phkp.forEach(function(item){ batch.set(db.collection('wfp_phkp').doc(item._id), item); });
-        erst.forEach(function(item){ batch.set(db.collection('wfp_erst').doc(item._id), item); });
-        koop.forEach(function(item){ batch.set(db.collection('wfp_koop').doc(item._id), item); });
-        return batch.commit().then(function() {
-          console.log('Migration erfolgreich: ' + phkp.length + ' PHKP, ' + erst.length + ' ERST, ' + koop.length + ' KOOP');
-          ladeApp(phkp, erst, koop);
-        });
-      }
-
-      // Schritt 1: Neue Collections laden
-      Promise.all([
-        db.collection('wfp_phkp').get(),
-        db.collection('wfp_erst').get(),
-        db.collection('wfp_koop').get()
-      ]).then(function(results) {
-        var phkpSnap = results[0], erstSnap = results[1], koopSnap = results[2];
-        var phkp = [], erst = [], koop = [];
-        phkpSnap.forEach(function(d){ phkp.push(d.data()); });
-        erstSnap.forEach(function(d){ erst.push(d.data()); });
-        koopSnap.forEach(function(d){ koop.push(d.data()); });
-
-        if (phkp.length > 0 || erst.length > 0 || koop.length > 0) {
-          // Neue Collections haben Daten → direkt laden
-          ladeApp(phkp, erst, koop);
-        } else {
-          // Neue Collections leer → alte Collection prüfen
-          fbSetSyncStatus('🔄 Suche alte Daten…', '#f97316');
-          return db.collection('wfp_data').doc('main').get().then(function(snap) {
-            if (snap.exists) {
-              var data = snap.data();
-              var altPhkp = [], altErst = [], altKoop = [];
-              try { altPhkp = JSON.parse(data.PHKP || '[]'); } catch(e) {}
-              try { altErst = JSON.parse(data.ERST || '[]'); } catch(e) {}
-              try { altKoop = JSON.parse(data.KOOP || '[]'); } catch(e) {}
-              if (altPhkp.length > 0 || altErst.length > 0 || altKoop.length > 0) {
-                return migriereDateien(altPhkp, altErst, altKoop);
-              }
-            }
-            // Wirklich keine Daten vorhanden
-            ladeApp([], [], []);
-          });
-        }
-      }).catch(function(e) {
-        console.error('Laden fehlgeschlagen:', e);
-        if (overlay) overlay.style.display = 'none';
-        fbSetSyncStatus('❌ Fehler: ' + e.message, '#ef4444');
-        alert('Fehler beim Laden: ' + e.message + '\n\nBitte Seite neu laden.');
-      });
-
-    } else {
-      if (ls) ls.style.display = 'flex';
-      if (ma) ma.style.display = 'none';
-    }
-  });
-</script>
 </head>
 <body>
 
@@ -6631,6 +6103,535 @@ document.addEventListener('DOMContentLoaded', function() {
     window._pendingRender = false;
   }
 });
+</script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+<script>
+  var firebaseConfig = {
+    apiKey: "AIzaSyAxQqdzNFOgYpbXliONDHa14cZfukN-uU8",
+    authDomain: "wfp-warteliste.firebaseapp.com",
+    projectId: "wfp-warteliste",
+    storageBucket: "wfp-warteliste.firebasestorage.app",
+    messagingSenderId: "286237800266",
+    appId: "1:286237800266:web:14089137c5c1c6731073b3"
+  };
+
+  firebase.initializeApp(firebaseConfig);
+  var db   = firebase.firestore();
+  var auth = firebase.auth();
+
+  window._fbDb   = db;
+  window._fbAuth = auth;
+  window._fbUser = null;
+
+  // ── Login ──────────────────────────────────────────────────────────────
+  // ── Login ─────────────────────────────────────────────────────────────
+  function doLogin() {
+    var email = (document.getElementById('loginEmail').value||'').trim();
+    var pass  = (document.getElementById('loginPass').value||'').trim();
+    var err   = document.getElementById('loginError');
+    var btn   = document.getElementById('loginBtn');
+    if (!email || !pass) { err.textContent = 'Bitte Email und Passwort eingeben.'; return; }
+    err.textContent = '⏳ Anmelden...';
+    if (btn) btn.disabled = true;
+    firebase.auth().signInWithEmailAndPassword(email, pass)
+      .catch(function(e) {
+        if (btn) btn.disabled = false;
+        err.textContent = (e.code === 'auth/invalid-credential' || e.code === 'auth/wrong-password' || e.code === 'auth/user-not-found')
+          ? '❌ Email oder Passwort falsch.'
+          : '❌ ' + e.message;
+      });
+  }
+  window.doLogin = doLogin;
+
+  // ── Logout ─────────────────────────────────────────────────────────────
+  window.fbLogout = function() {
+    auth.signOut();
+  };
+
+  // ════════════════════════════════════════════════════════════════════════
+  // ECHTZEIT-SYNC — Jeder Eintrag = eigenes Firestore-Dokument
+  // Kein "Last Write Wins" mehr. Mehrere Nutzer können gleichzeitig arbeiten.
+  // ════════════════════════════════════════════════════════════════════════
+
+  // Sync-Status anzeigen
+  function fbSetSyncStatus(text, color) {
+    var s = document.getElementById('fbSyncStatus');
+    if (s) { s.textContent = text; s.style.color = color || 'rgba(255,255,255,0.45)'; }
+  }
+
+  // Eindeutige ID für jeden neuen Eintrag generieren
+  function fbNewId() {
+    return db.collection('_').doc().id; // Firestore-ID ohne zu schreiben
+  }
+
+  // Sicherstellen dass alle Einträge eine _id haben (Migration)
+  function ensureIds(arr, prefix) {
+    arr.forEach(function(item) {
+      if (!item._id) item._id = prefix + '_' + Date.now() + '_' + Math.random().toString(36).slice(2,8);
+    });
+  }
+
+  // ── Einzelnen Eintrag speichern (atomar — berührt keine anderen Einträge) ──
+  window.fbSaveItem = function(collection, item) {
+    if (!window._fbUser) return Promise.resolve();
+    if (!item._id) item._id = fbNewId();
+    item._updatedAt = new Date().toISOString();
+    item._updatedBy = window._fbUser.email;
+    return db.collection(collection).doc(item._id).set(item)
+      .then(function() {
+        fbSetSyncStatus('✅ ' + new Date().toLocaleTimeString('de-DE') + ' · ' + (window._fbUser.email.split('@')[0]), '#22c55e');
+      })
+      .catch(function(e) {
+        fbSetSyncStatus('❌ Fehler beim Speichern', '#ef4444');
+        console.error('fbSaveItem Fehler:', e);
+      });
+  };
+
+  // ── Eintrag löschen (Soft-Delete: nur geloescht-Flag setzen) ─────────
+  window.fbDeleteItem = function(collection, id) {
+    if (!window._fbUser || !id) return Promise.resolve();
+    return db.collection(collection).doc(id).update({
+      geloescht: true,
+      _updatedAt: new Date().toISOString(),
+      _updatedBy: window._fbUser.email
+    }).catch(function(e) { console.error('fbDeleteItem Fehler:', e); });
+  };
+
+  // ── Komplette Collection schreiben (für Batch-Import) ────────────────
+  window.fbSaveAll = function() {
+    if (!window._fbUser) return Promise.resolve();
+    fbSetSyncStatus('💾 Synchronisiere…', '#f97316');
+    ensureIds(window.PHKP||[], 'p');
+    ensureIds(window.ERST||[], 'e');
+    ensureIds(window.KOOP||[], 'k');
+
+    // Batch-Writes (max 500 pro Batch — reicht hier locker)
+    var batch = db.batch();
+    var who = window._fbUser.email;
+    var now = new Date().toISOString();
+
+    (window.PHKP||[]).forEach(function(item) {
+      item._updatedAt = now; item._updatedBy = who;
+      batch.set(db.collection('wfp_phkp').doc(item._id), item);
+    });
+    (window.ERST||[]).forEach(function(item) {
+      item._updatedAt = now; item._updatedBy = who;
+      batch.set(db.collection('wfp_erst').doc(item._id), item);
+    });
+    (window.KOOP||[]).forEach(function(item) {
+      item._updatedAt = now; item._updatedBy = who;
+      batch.set(db.collection('wfp_koop').doc(item._id), item);
+    });
+
+    return batch.commit()
+      .then(function() {
+        fbSetSyncStatus('✅ ' + new Date().toLocaleTimeString('de-DE'), '#22c55e');
+      })
+      .catch(function(e) {
+        fbSetSyncStatus('❌ Sync fehlgeschlagen', '#ef4444');
+        console.error('fbSaveAll Fehler:', e);
+      });
+  };
+
+  // Kompatibilität: saveToLocal ruft jetzt fbSaveAll auf
+  window.fbSave = window.fbSaveAll;
+  window.fbSaveDebounced = window.fbSaveAll; // Kein Debounce nötig bei Einzel-Writes
+  window.fbMarkEditing = function() {}; // Nicht mehr nötig
+
+  // ── Realtime Listener für alle 3 Collections ─────────────────────────
+  window._fbStartSync = function() {
+    function rerender() {
+      if (typeof renderPhkp === 'function') renderPhkp();
+      if (typeof renderErst === 'function') renderErst();
+      if (typeof renderGenehmigung === 'function') renderGenehmigung();
+      if (typeof renderKoop === 'function') renderKoop();
+      if (typeof updateTabBadges === 'function') updateTabBadges();
+    }
+
+    function showUpdateBanner(who) {
+      var banner = document.getElementById('fbSyncBanner');
+      if (banner && who && who !== (window._fbUser ? window._fbUser.email : '')) {
+        banner.textContent = '🔄 ' + who.split('@')[0] + ' hat gerade Daten aktualisiert';
+        banner.style.display = 'block';
+        clearTimeout(banner._hideTimer);
+        banner._hideTimer = setTimeout(function(){ banner.style.display = 'none'; }, 4000);
+      }
+    }
+
+    // PHKP Collection Listener
+    db.collection('wfp_phkp').onSnapshot(function(snap) {
+      if (snap.empty && (window.PHKP||[]).length === 0) return;
+      var changed = false;
+      snap.docChanges().forEach(function(change) {
+        var data = change.doc.data();
+        var idx = (window.PHKP||[]).findIndex(function(p){ return p._id === data._id; });
+        if (change.type === 'removed') {
+          if (idx >= 0) { window.PHKP.splice(idx, 1); changed = true; }
+        } else {
+          // added oder modified
+          if (idx >= 0) { window.PHKP[idx] = data; }
+          else { window.PHKP.push(data); }
+          changed = true;
+          if (change.type === 'modified') showUpdateBanner(data._updatedBy);
+        }
+      });
+      if (changed) {
+        rerender();
+        fbSetSyncStatus('🔄 ' + new Date().toLocaleTimeString('de-DE'), '');
+      }
+    }, function(e) { console.error('PHKP Listener Fehler:', e); });
+
+    // ERST Collection Listener
+    db.collection('wfp_erst').onSnapshot(function(snap) {
+      if (snap.empty && (window.ERST||[]).length === 0) return;
+      snap.docChanges().forEach(function(change) {
+        var data = change.doc.data();
+        var idx = (window.ERST||[]).findIndex(function(e){ return e._id === data._id; });
+        if (change.type === 'removed') {
+          if (idx >= 0) { window.ERST.splice(idx, 1); }
+        } else {
+          if (idx >= 0) { window.ERST[idx] = data; }
+          else { window.ERST.push(data); }
+          if (change.type === 'modified') showUpdateBanner(data._updatedBy);
+        }
+      });
+      rerender();
+    }, function(e) { console.error('ERST Listener Fehler:', e); });
+
+    // KOOP Collection Listener
+    db.collection('wfp_koop').onSnapshot(function(snap) {
+      if (snap.empty && (window.KOOP||[]).length === 0) return;
+      snap.docChanges().forEach(function(change) {
+        var data = change.doc.data();
+        var idx = (window.KOOP||[]).findIndex(function(k){ return k._id === data._id; });
+        if (change.type === 'removed') {
+          if (idx >= 0) { window.KOOP.splice(idx, 1); }
+        } else {
+          if (idx >= 0) { window.KOOP[idx] = data; }
+          else { window.KOOP.push(data); }
+          if (change.type === 'modified') showUpdateBanner(data._updatedBy);
+        }
+      });
+      rerender();
+    }, function(e) { console.error('KOOP Listener Fehler:', e); });
+
+    fbSetSyncStatus('🟢 Verbunden', '#22c55e');
+    setTimeout(function(){ fbSetSyncStatus('', ''); }, 3000);
+  };
+
+  // ── Admin: Passwort-Stärke prüfen ─────────────────────────────────────
+  window.adminCheckPassStrength = function(v) {
+    var b1=document.getElementById('adminPassBar1'),b2=document.getElementById('adminPassBar2');
+    var b3=document.getElementById('adminPassBar3'),b4=document.getElementById('adminPassBar4');
+    var lb=document.getElementById('adminPassLabel');
+    if(!b1)return;
+    var s=0;
+    if(v.length>=4)s++;
+    if(v.length>=8)s++;
+    if(/[A-Z]/.test(v)&&/[a-z]/.test(v))s++;
+    if(/\d/.test(v)||/[^A-Za-z0-9]/.test(v))s++;
+    var colors=['#e2e8f0','#e2e8f0','#e2e8f0','#e2e8f0'];
+    var label='',lc='#94a3b8';
+    if(v.length===0){label='';}
+    else if(s<=1){colors[0]='#ef4444';label='Schwach';lc='#ef4444';}
+    else if(s===2){colors[0]='#f97316';colors[1]='#f97316';label='Mittel';lc='#f97316';}
+    else if(s===3){colors[0]='#eab308';colors[1]='#eab308';colors[2]='#eab308';label='Gut';lc='#eab308';}
+    else{colors[0]='#22c55e';colors[1]='#22c55e';colors[2]='#22c55e';colors[3]='#22c55e';label='Stark';lc='#22c55e';}
+    [b1,b2,b3,b4].forEach(function(b,i){b.style.background=colors[i];});
+    if(lb){lb.textContent=label;lb.style.color=lc;}
+  };
+
+  // ── Admin: Passwort anzeigen/verbergen ────────────────────────────────
+  window.adminTogglePassVis = function(inputId, btn) {
+    var inp = document.getElementById(inputId);
+    if (!inp) return;
+    if (inp.type === 'password') { inp.type = 'text'; btn.textContent = '🙈'; }
+    else { inp.type = 'password'; btn.textContent = '👁'; }
+  };
+
+  // ── Admin: Tab wechseln ───────────────────────────────────────────────
+  window.adminSwitchTab = function(tab) {
+    ['create','list','pw'].forEach(function(t) {
+      var btn = document.getElementById('adminTab_'+t);
+      var panel = document.getElementById('adminPanel_'+t);
+      if (btn) { btn.classList.toggle('active', t===tab); }
+      if (panel) panel.style.display = t===tab ? 'block' : 'none';
+    });
+    if (tab === 'list') window.adminLoadUsers();
+  };
+
+  // ── Admin: Feedback-Nachricht helper ─────────────────────────────────
+  function adminSetMsg(id, msg, type) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = msg;
+    el.className = 'adm-msg show ' + (type||'info');
+    if (!msg) { el.className = 'adm-msg'; }
+  }
+
+  // ── Admin: Nutzer anlegen ─────────────────────────────────────────────
+  window.adminCreateUser = function() {
+    var name  = (document.getElementById('adminNewName').value||'').trim();
+    var email = (document.getElementById('adminNewEmail').value||'').trim();
+    var pass  = (document.getElementById('adminNewPass').value||'').trim();
+    var role  = (document.getElementById('adminNewRole').value||'mitarbeiter');
+    if (!name)  { adminSetMsg('adminCreateError','❌ Bitte den vollständigen Namen eingeben.','err'); return; }
+    if (!email) { adminSetMsg('adminCreateError','❌ Bitte eine E-Mail-Adresse eingeben.','err'); return; }
+    if (!pass || pass.length < 6) { adminSetMsg('adminCreateError','❌ Passwort muss mindestens 6 Zeichen haben.','err'); return; }
+
+    var adminUser  = auth.currentUser;
+    var adminEmail = adminUser ? adminUser.email : null;
+    adminSetMsg('adminCreateError','⏳ Account wird angelegt…','info');
+
+    // Unique name to avoid conflicts between multiple user creations
+    var secAppName = 'secondary_' + Date.now();
+    var secondaryApp = firebase.initializeApp(firebase.app().options, secAppName);
+    var secondaryAuth = secondaryApp.auth();
+
+    secondaryAuth.createUserWithEmailAndPassword(email, pass)
+      .then(function(cred) {
+        return cred.user.updateProfile({ displayName: name })
+          .then(function() {
+            return db.collection('users').doc(cred.user.uid).set({
+              name:name, email:email, role:role,
+              createdAt: new Date().toISOString(),
+              createdBy: adminEmail || 'admin'
+            });
+          })
+          .then(function() {
+            // Sign out the new user from secondary app, then delete the app
+            // This prevents the admin from being logged out
+            return secondaryAuth.signOut().then(function() {
+              return secondaryApp.delete();
+            });
+          });
+      })
+      .then(function() {
+        adminSetMsg('adminCreateError','✅ Account für '+name+' wurde erfolgreich angelegt!','ok');
+        document.getElementById('adminNewName').value = '';
+        document.getElementById('adminNewEmail').value = '';
+        document.getElementById('adminNewPass').value = '';
+        document.getElementById('adminNewRole').value = 'mitarbeiter';
+        window.adminCheckPassStrength('');
+        window.adminRefreshStats && window.adminRefreshStats();
+      })
+      .catch(function(e) {
+        if (e.code==='auth/email-already-in-use') adminSetMsg('adminCreateError','❌ Diese E-Mail ist bereits registriert.','err');
+        else if (e.code==='auth/invalid-email')   adminSetMsg('adminCreateError','❌ Ungültige E-Mail-Adresse.','err');
+        else if (e.code==='auth/weak-password')   adminSetMsg('adminCreateError','❌ Passwort zu schwach — mind. 6 Zeichen bei Firebase.','err');
+        else adminSetMsg('adminCreateError','❌ '+( e.message||e.code),'err');
+      });
+  };
+
+  // ── Admin: Passwort ändern ────────────────────────────────────────────
+  window.adminChangePassword = function() {
+    var curr  = (document.getElementById('adminCurrPass').value||'').trim();
+    var next1 = (document.getElementById('adminNewPassPW').value||'').trim();
+    var next2 = (document.getElementById('adminNewPassPW2').value||'').trim();
+    if (!curr)  { adminSetMsg('adminPwChangeError','❌ Bitte das aktuelle Passwort eingeben.','err'); return; }
+    if (!next1 || next1.length < 4) { adminSetMsg('adminPwChangeError','❌ Neues Passwort muss mind. 4 Zeichen haben.','err'); return; }
+    if (next1 !== next2) { adminSetMsg('adminPwChangeError','❌ Neue Passwörter stimmen nicht überein.','err'); return; }
+    var user = auth.currentUser;
+    if (!user) { adminSetMsg('adminPwChangeError','❌ Kein Nutzer angemeldet.','err'); return; }
+    adminSetMsg('adminPwChangeError','⏳ Passwort wird aktualisiert…','info');
+    var credential = firebase.auth.EmailAuthProvider.credential(user.email, curr);
+    user.reauthenticateWithCredential(credential)
+      .then(function() { return user.updatePassword(next1); })
+      .then(function() {
+        adminSetMsg('adminPwChangeError','✅ Passwort erfolgreich geändert!','ok');
+        document.getElementById('adminCurrPass').value = '';
+        document.getElementById('adminNewPassPW').value = '';
+        document.getElementById('adminNewPassPW2').value = '';
+      })
+      .catch(function(e) {
+        if (e.code==='auth/wrong-password'||e.code==='auth/invalid-credential') adminSetMsg('adminPwChangeError','❌ Aktuelles Passwort falsch.','err');
+        else if (e.code==='auth/weak-password') adminSetMsg('adminPwChangeError','❌ Neues Passwort zu schwach.','err');
+        else adminSetMsg('adminPwChangeError','❌ '+(e.message||e.code),'err');
+      });
+  };
+
+  // ── Admin: Nutzer laden ───────────────────────────────────────────────
+  window.adminLoadUsers = function() {
+    var list = document.getElementById('adminUserList');
+    if (!list) return;
+    list.innerHTML = '<div style="text-align:center;padding:24px;color:#94a3b8;font-size:12px;">⏳ Lade Mitarbeiter…</div>';
+    db.collection('users').orderBy('createdAt','asc').get()
+      .then(function(snap) {
+        var statEl = document.getElementById('adminStatUsers');
+        if (statEl) statEl.textContent = snap.size;
+        if (snap.empty) {
+          list.innerHTML = '<div style="text-align:center;padding:28px;color:#94a3b8;font-size:12px;">Noch keine Mitarbeiter angelegt.</div>';
+          return;
+        }
+        var html = '';
+        snap.forEach(function(d) {
+          var u = d.data(), uid = d.id;
+          var isAdmin = u.role === 'admin';
+          var isSelf = auth.currentUser && auth.currentUser.uid === uid;
+          var initials = (u.name||'?').split(' ').map(function(w){return w[0]||'';}).join('').toUpperCase().slice(0,2);
+          var avatarBg = isAdmin ? 'linear-gradient(135deg,#1B557A,#0369a1)' : 'linear-gradient(135deg,#0f766e,#0d9488)';
+          html += '<div class="adm-user-card">'
+            +'<div class="adm-avatar" style="background:'+avatarBg+';">'+initials+'</div>'
+            +'<div style="flex:1;min-width:0;">'
+            +'<div style="font-size:12px;font-weight:700;color:#1e293b;">'+(u.name||'–')+(isSelf?' <span style="font-size:9px;color:#1B557A;background:#e0f2fe;padding:1px 5px;border-radius:5px;">ich</span>':'')+'</div>'
+            +'<div style="font-size:10px;color:#94a3b8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+(u.email||'–')+'</div>'
+            +'</div>'
+            +'<span class="adm-role-badge" style="'+(isAdmin?'background:#dbeafe;color:#1d4ed8;':'background:#dcfce7;color:#15803d;')+'">'+(isAdmin?'🔑 Admin':'👩‍💼 Mitarb.')+'</span>'
+            +(isSelf?'':'<button class="adm-del-btn" onclick="adminDeleteUser(\''+uid+'\',\''+(u.name||'').replace(/'/g,"\\'")+'\')" title="Löschen">🗑</button>')
+            +'</div>';
+        });
+        list.innerHTML = html;
+      })
+      .catch(function(e) {
+        list.innerHTML = '<div style="padding:12px;background:#fef2f2;border-radius:9px;color:#dc2626;font-size:11px;">❌ Fehler: '+(e.message||e.code)+'</div>';
+      });
+  };
+
+  // ── Admin: Stats Header aktualisieren ────────────────────────────────
+  window.adminRefreshStats = function() {
+    var patNames = {};
+    (window.PHKP||[]).filter(function(p){return !p.geloescht&&!p.pause_seit;}).forEach(function(p){patNames[p.name]=true;});
+    var nPat = Object.keys(patNames).length;
+    var nEK  = (window.ERST||[]).filter(function(e){return !e.geloescht&&!e.eingeplant;}).length;
+    var sp = document.getElementById('adminStatPat');
+    var se = document.getElementById('adminStatEK');
+    if (sp) sp.textContent = nPat;
+    if (se) se.textContent = nEK;
+    db.collection('users').get().then(function(snap){
+      var su = document.getElementById('adminStatUsers');
+      if (su) su.textContent = snap.size;
+    }).catch(function(){});
+  };
+
+  // ── Admin: Nutzer löschen ─────────────────────────────────────────────
+  window.adminDeleteUser = function(uid, name) {
+    if (!confirm('Account von "'+name+'" wirklich löschen?\n\nDer Login wird deaktiviert.')) return;
+    db.collection('users').doc(uid).delete()
+      .then(function() { window.adminLoadUsers(); })
+      .catch(function(e) { alert('Fehler: '+(e.message||e.code)); });
+  };
+
+  // ── Admin Panel öffnen ────────────────────────────────────────────────
+  window.openAdminPanel = function() {
+    var modal = document.getElementById('modalAdmin');
+    var emailEl = document.getElementById('adminCurrentEmail');
+    if (emailEl && auth.currentUser) emailEl.textContent = '👤 '+auth.currentUser.email;
+    modal.style.display = 'flex';
+    window.adminSwitchTab('create');
+    window.adminRefreshStats && window.adminRefreshStats();
+  };
+
+  // ── Auth Status überwachen ─────────────────────────────────────────────
+  auth.onAuthStateChanged(function(user) {
+    window._fbUser = user;
+    var ls = document.getElementById('loginScreen');
+    var ma = document.getElementById('mainApp');
+    if (user) {
+      // App anzeigen, aber mit Lade-Overlay bis Daten da sind
+      if (ls) ls.style.display = 'none';
+      if (ma) ma.style.display = 'block';
+      var uel = document.getElementById('topbarUser');
+      if (uel) uel.textContent = '👤 ' + (user.displayName || user.email.split('@')[0]);
+
+      // Lade-Overlay einblenden
+      var overlay = document.getElementById('fbLoadingOverlay');
+      if (overlay) overlay.style.display = 'flex';
+      fbSetSyncStatus('⏳ Wird geladen…', '#f97316');
+
+      // Daten laden: erst neue Collections prüfen, dann alte als Fallback
+      function ladeApp(phkp, erst, koop) {
+        window.PHKP = phkp;
+        window.ERST = erst;
+        window.KOOP = koop;
+        // Warte 2 Sekunden bis alle Scripts geladen sind, dann rendern
+        window._pendingPhkp = phkp;
+        window._pendingErst = erst;
+        window._pendingKoop = koop;
+        setTimeout(function() {
+          window.PHKP = window._pendingPhkp;
+          window.ERST = window._pendingErst;
+          window.KOOP = window._pendingKoop;
+          renderPhkp();
+          renderErst();
+          renderGenehmigung();
+          renderKoop();
+          updateTabBadges();
+          var ov = document.getElementById('fbLoadingOverlay');
+          if (ov) ov.style.display = 'none';
+          window._fbStartSync();
+        }, 2000);
+      }
+
+      function migriereDateien(phkp, erst, koop) {
+        // IDs vergeben
+        function mitId(arr, prefix) {
+          return arr.map(function(item) {
+            if (!item._id) item._id = prefix + '_' + Math.random().toString(36).slice(2,10) + '_' + Date.now();
+            return item;
+          });
+        }
+        phkp = mitId(phkp, 'p');
+        erst = mitId(erst, 'e');
+        koop = mitId(koop, 'k');
+
+        fbSetSyncStatus('🔄 Einmalige Migration läuft…', '#f97316');
+        var batch = db.batch();
+        phkp.forEach(function(item){ batch.set(db.collection('wfp_phkp').doc(item._id), item); });
+        erst.forEach(function(item){ batch.set(db.collection('wfp_erst').doc(item._id), item); });
+        koop.forEach(function(item){ batch.set(db.collection('wfp_koop').doc(item._id), item); });
+        return batch.commit().then(function() {
+          console.log('Migration erfolgreich: ' + phkp.length + ' PHKP, ' + erst.length + ' ERST, ' + koop.length + ' KOOP');
+          ladeApp(phkp, erst, koop);
+        });
+      }
+
+      // Schritt 1: Neue Collections laden
+      Promise.all([
+        db.collection('wfp_phkp').get(),
+        db.collection('wfp_erst').get(),
+        db.collection('wfp_koop').get()
+      ]).then(function(results) {
+        var phkpSnap = results[0], erstSnap = results[1], koopSnap = results[2];
+        var phkp = [], erst = [], koop = [];
+        phkpSnap.forEach(function(d){ phkp.push(d.data()); });
+        erstSnap.forEach(function(d){ erst.push(d.data()); });
+        koopSnap.forEach(function(d){ koop.push(d.data()); });
+
+        if (phkp.length > 0 || erst.length > 0 || koop.length > 0) {
+          // Neue Collections haben Daten → direkt laden
+          ladeApp(phkp, erst, koop);
+        } else {
+          // Neue Collections leer → alte Collection prüfen
+          fbSetSyncStatus('🔄 Suche alte Daten…', '#f97316');
+          return db.collection('wfp_data').doc('main').get().then(function(snap) {
+            if (snap.exists) {
+              var data = snap.data();
+              var altPhkp = [], altErst = [], altKoop = [];
+              try { altPhkp = JSON.parse(data.PHKP || '[]'); } catch(e) {}
+              try { altErst = JSON.parse(data.ERST || '[]'); } catch(e) {}
+              try { altKoop = JSON.parse(data.KOOP || '[]'); } catch(e) {}
+              if (altPhkp.length > 0 || altErst.length > 0 || altKoop.length > 0) {
+                return migriereDateien(altPhkp, altErst, altKoop);
+              }
+            }
+            // Wirklich keine Daten vorhanden
+            ladeApp([], [], []);
+          });
+        }
+      }).catch(function(e) {
+        console.error('Laden fehlgeschlagen:', e);
+        if (overlay) overlay.style.display = 'none';
+        fbSetSyncStatus('❌ Fehler: ' + e.message, '#ef4444');
+        alert('Fehler beim Laden: ' + e.message + '\n\nBitte Seite neu laden.');
+      });
+
+    } else {
+      if (ls) ls.style.display = 'flex';
+      if (ma) ma.style.display = 'none';
+    }
+  });
 </script>
 </body>
 </html>
