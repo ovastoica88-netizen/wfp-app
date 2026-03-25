@@ -640,26 +640,7 @@ tbody td { padding: 9px 12px; font-size: 13px; }
   };
 
   // ── Auth Status überwachen ─────────────────────────────────────────────
-  // Warten bis die ganze Seite geladen ist bevor Auth geprüft wird
-  window._authUser = null;
-  window._pageReady = false;
-
   auth.onAuthStateChanged(function(user) {
-    window._authUser = user;
-    // If page already ready, handle immediately. Otherwise wait for load event.
-    if (window._pageReady) {
-      window._handleAuth(user);
-    }
-    // Also trigger after a short delay in case load event already fired
-    setTimeout(function() {
-      if (!window._authHandled && window._handleAuth) {
-        window._authHandled = true;
-        window._handleAuth(user);
-      }
-    }, 1000);
-  });
-
-  window._handleAuth = function(user) {
     window._fbUser = user;
     var ls = document.getElementById('loginScreen');
     var ma = document.getElementById('mainApp');
@@ -680,23 +661,22 @@ tbody td { padding: 9px 12px; font-size: 13px; }
         window.PHKP = phkp;
         window.ERST = erst;
         window.KOOP = koop;
-        // Retry until render functions are available
-        function tryRender(n) {
-          if (typeof renderPhkp === 'function' && typeof renderErst === 'function' && typeof renderKoop === 'function') {
-            renderPhkp();
-            renderErst();
-            if (typeof renderGenehmigung === 'function') renderGenehmigung();
-            renderKoop();
-            if (typeof updateTabBadges === 'function') updateTabBadges();
-            if (overlay) overlay.style.display = 'none';
-            fbSetSyncStatus('🟢 Verbunden', '#22c55e');
-            setTimeout(function(){ fbSetSyncStatus('', ''); }, 2000);
-            window._fbStartSync();
-          } else if (n > 0) {
-            setTimeout(function(){ tryRender(n - 1); }, 200);
-          }
+        // Store data globally and render when ready
+        window._pendingRender = true;
+        if (typeof renderPhkp === 'function') {
+          // Functions already available - render now
+          renderPhkp();
+          renderErst();
+          if (typeof renderGenehmigung === 'function') renderGenehmigung();
+          renderKoop();
+          if (typeof updateTabBadges === 'function') updateTabBadges();
+          if (overlay) overlay.style.display = 'none';
+          fbSetSyncStatus('🟢 Verbunden', '#22c55e');
+          setTimeout(function(){ fbSetSyncStatus('', ''); }, 2000);
+          window._fbStartSync();
+          window._pendingRender = false;
         }
-        tryRender(30);
+        // If not ready yet, the DOMContentLoaded handler below will render
       }
 
       function migriereDateien(phkp, erst, koop) {
@@ -766,7 +746,7 @@ tbody td { padding: 9px 12px; font-size: 13px; }
       if (ls) ls.style.display = 'flex';
       if (ma) ma.style.display = 'none';
     }
-  }; // end _handleAuth
+  });
 </script>
 </head>
 <body>
@@ -6636,12 +6616,18 @@ if (isIOS && !window.navigator.standalone) {
 }
 </script>
 <script>
-// Seite ist komplett geladen - jetzt Auth auslösen
-window.addEventListener('load', function() {
-  window._pageReady = true;
-  if (!window._authHandled && window._authUser !== undefined && window._handleAuth) {
-    window._authHandled = true;
-    window._handleAuth(window._authUser);
+// Als letztes: prüfen ob Daten schon geladen aber noch nicht gerendert wurden
+document.addEventListener('DOMContentLoaded', function() {
+  if (window._pendingRender && window.PHKP) {
+    if (typeof renderPhkp === 'function') renderPhkp();
+    if (typeof renderErst === 'function') renderErst();
+    if (typeof renderGenehmigung === 'function') renderGenehmigung();
+    if (typeof renderKoop === 'function') renderKoop();
+    if (typeof updateTabBadges === 'function') updateTabBadges();
+    var overlay = document.getElementById('fbLoadingOverlay');
+    if (overlay) overlay.style.display = 'none';
+    if (typeof window._fbStartSync === 'function') window._fbStartSync();
+    window._pendingRender = false;
   }
 });
 </script>
